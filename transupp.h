@@ -1,7 +1,7 @@
 /*
  * transupp.h
  *
- * Copyright (C) 1997-2009, Thomas G. Lane, Guido Vollbeding.
+ * Copyright (C) 1997-2010, Thomas G. Lane, Guido Vollbeding.
  * This file is part of the Independent JPEG Group's software.
  * For conditions of distribution and use, see the accompanying README file.
  *
@@ -101,7 +101,8 @@ typedef enum {
 	JXFORM_TRANSVERSE,	/* transpose across UR-to-LL axis */
 	JXFORM_ROT_90,		/* 90-degree clockwise rotation */
 	JXFORM_ROT_180,		/* 180-degree rotation */
-	JXFORM_ROT_270		/* 270-degree clockwise (or 90 ccw) */
+	JXFORM_ROT_270,		/* 270-degree clockwise (or 90 ccw) */
+	JXFORM_DROP		/* drop */
 } JXFORM_CODE;
 
 /*
@@ -141,6 +142,10 @@ typedef struct {
   JDIMENSION crop_yoffset;	/* Y offset of selected region */
   JCROP_CODE crop_yoffset_set;	/* (negative measures from bottom edge) */
 
+  /* Drop parameters: set by caller for drop request */
+  j_decompress_ptr drop_ptr;
+  jvirt_barray_ptr * drop_coef_arrays;
+
   /* Internal workspace: caller should not touch these */
   int num_components;		/* # of components in workspace */
   jvirt_barray_ptr * workspace_coef_arrays; /* workspace for transformations */
@@ -148,6 +153,8 @@ typedef struct {
   JDIMENSION output_height;
   JDIMENSION x_crop_offset;	/* destination crop offsets measured in iMCUs */
   JDIMENSION y_crop_offset;
+  JDIMENSION drop_width;	/* drop dimensions measured in iMCUs */
+  JDIMENSION drop_height;
   int iMCU_sample_width;	/* destination iMCU size */
   int iMCU_sample_height;
 } jpeg_transform_info;
