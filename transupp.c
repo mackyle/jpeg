@@ -1,7 +1,7 @@
 /*
  * transupp.c
  *
- * Copyright (C) 1997-2010, Thomas G. Lane, Guido Vollbeding.
+ * Copyright (C) 1997-2012, Thomas G. Lane, Guido Vollbeding.
  * This file is part of the Independent JPEG Group's software.
  * For conditions of distribution and use, see the accompanying README file.
  *
@@ -329,8 +329,8 @@ do_drop (j_decompress_ptr srcinfo, j_compress_ptr dstinfo,
 	}
       } else {
 	for (offset_y = 0; offset_y < compptr->v_samp_factor; offset_y++) {
-	  jzero_far(dst_buffer[offset_y] + x_drop_blocks,
-		    comp_width * SIZEOF(JBLOCK));
+	  FMEMZERO(dst_buffer[offset_y] + x_drop_blocks,
+		   comp_width * SIZEOF(JBLOCK));
 	} 	
       }
     }
@@ -375,8 +375,8 @@ do_crop (j_decompress_ptr srcinfo, j_compress_ptr dstinfo,
 	if (dst_blk_y < y_crop_blocks ||
 	    dst_blk_y >= comp_height + y_crop_blocks) {
 	  for (offset_y = 0; offset_y < compptr->v_samp_factor; offset_y++) {
-	    jzero_far(dst_buffer[offset_y],
-		      compptr->width_in_blocks * SIZEOF(JBLOCK));
+	    FMEMZERO(dst_buffer[offset_y],
+		     compptr->width_in_blocks * SIZEOF(JBLOCK));
 	  }
 	  continue;
 	}
@@ -393,17 +393,17 @@ do_crop (j_decompress_ptr srcinfo, j_compress_ptr dstinfo,
       for (offset_y = 0; offset_y < compptr->v_samp_factor; offset_y++) {
 	if (dstinfo->jpeg_width > srcinfo->output_width) {
 	  if (x_crop_blocks > 0) {
-	    jzero_far(dst_buffer[offset_y],
-		      x_crop_blocks * SIZEOF(JBLOCK));
+	    FMEMZERO(dst_buffer[offset_y],
+		     x_crop_blocks * SIZEOF(JBLOCK));
 	  }
 	  jcopy_block_row(src_buffer[offset_y],
 			  dst_buffer[offset_y] + x_crop_blocks,
 			  comp_width);
 	  if (compptr->width_in_blocks > comp_width + x_crop_blocks) {
-	    jzero_far(dst_buffer[offset_y] +
-			comp_width + x_crop_blocks,
-		      (compptr->width_in_blocks -
-			comp_width - x_crop_blocks) * SIZEOF(JBLOCK));
+	    FMEMZERO(dst_buffer[offset_y] +
+		       comp_width + x_crop_blocks,
+		     (compptr->width_in_blocks -
+		       comp_width - x_crop_blocks) * SIZEOF(JBLOCK));
 	  }
 	} else {
 	  jcopy_block_row(src_buffer[offset_y] + x_crop_blocks,
@@ -1074,7 +1074,7 @@ jt_read_integer (const char ** strptr, JDIMENSION * result)
  * The routine returns TRUE if the spec string is valid, FALSE if not.
  *
  * The crop spec string should have the format
- *	<width>x<height>{+-}<xoffset>{+-}<yoffset>
+ *	<width>[f]x<height>[f]{+-}<xoffset>{+-}<yoffset>
  * where width, height, xoffset, and yoffset are unsigned integers.
  * Each of the elements can be omitted to indicate a default value.
  * (A weakness of this style is that it is not possible to omit xoffset
@@ -1096,14 +1096,22 @@ jtransform_parse_crop_spec (jpeg_transform_info *info, const char *spec)
     /* fetch width */
     if (! jt_read_integer(&spec, &info->crop_width))
       return FALSE;
-    info->crop_width_set = JCROP_POS;
+    if (*spec == 'f' || *spec == 'F') {
+      spec++;
+      info->crop_width_set = JCROP_FORCE;
+    } else
+      info->crop_width_set = JCROP_POS;
   }
-  if (*spec == 'x' || *spec == 'X') {	
+  if (*spec == 'x' || *spec == 'X') {
     /* fetch height */
     spec++;
     if (! jt_read_integer(&spec, &info->crop_height))
       return FALSE;
-    info->crop_height_set = JCROP_POS;
+    if (*spec == 'f' || *spec == 'F') {
+      spec++;
+      info->crop_height_set = JCROP_FORCE;
+    } else
+      info->crop_height_set = JCROP_POS;
   }
   if (*spec == '+' || *spec == '-') {
     /* fetch xoffset */
@@ -1355,12 +1363,14 @@ jtransform_request_workspace (j_decompress_ptr srcinfo,
 	}
     } else {
       /* Ensure the effective crop region will cover the requested */
-      if (info->crop_width > info->output_width)
+      if (info->crop_width_set == JCROP_FORCE ||
+	  info->crop_width > info->output_width)
 	info->output_width = info->crop_width;
       else
 	info->output_width =
 	  info->crop_width + (xoffset % info->iMCU_sample_width);
-      if (info->crop_height > info->output_height)
+      if (info->crop_height_set == JCROP_FORCE ||
+	  info->crop_height > info->output_height)
 	info->output_height = info->crop_height;
       else
 	info->output_height =
