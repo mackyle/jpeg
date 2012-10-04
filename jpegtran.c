@@ -512,7 +512,7 @@ main (int argc, char **argv)
 
   /* Adjust default decompression parameters */
   if (scaleoption != NULL)
-    if (sscanf(scaleoption, "%d/%d",
+    if (sscanf(scaleoption, "%u/%u",
 	&srcinfo.scale_num, &srcinfo.scale_denom) < 1)
       usage();
 

@@ -1327,17 +1327,23 @@ jtransform_request_workspace (j_decompress_ptr srcinfo,
       itemp = info->iMCU_sample_width;
       dtemp = itemp - 1 - ((xoffset + itemp - 1) % itemp);
       xoffset += dtemp;
-      if (info->crop_width > dtemp)
-	info->drop_width = (info->crop_width - dtemp) / itemp;
-      else
+      if (info->crop_width <= dtemp)
 	info->drop_width = 0;
+      else if (xoffset + info->crop_width - dtemp == info->output_width)
+	/* Matching right edge: include partial iMCU */
+	info->drop_width = (info->crop_width - dtemp + itemp - 1) / itemp;
+      else
+	info->drop_width = (info->crop_width - dtemp) / itemp;
       itemp = info->iMCU_sample_height;
       dtemp = itemp - 1 - ((yoffset + itemp - 1) % itemp);
       yoffset += dtemp;
-      if (info->crop_height > dtemp)
-	info->drop_height = (info->crop_height - dtemp) / itemp;
-      else
+      if (info->crop_height <= dtemp)
 	info->drop_height = 0;
+      else if (yoffset + info->crop_height - dtemp == info->output_height)
+	/* Matching bottom edge: include partial iMCU */
+	info->drop_height = (info->crop_height - dtemp + itemp - 1) / itemp;
+      else
+	info->drop_height = (info->crop_height - dtemp) / itemp;
       /* Check if sampling factors match for dropping */
       if (info->drop_width != 0 && info->drop_height != 0)
 	for (ci = 0; ci < info->num_components &&
@@ -1461,7 +1467,7 @@ jtransform_request_workspace (j_decompress_ptr srcinfo,
   if (need_workspace) {
     coef_arrays = (jvirt_barray_ptr *)
       (*srcinfo->mem->alloc_small) ((j_common_ptr) srcinfo, JPOOL_IMAGE,
-		SIZEOF(jvirt_barray_ptr) * info->num_components);
+	SIZEOF(jvirt_barray_ptr) * info->num_components);
     width_in_iMCUs = (JDIMENSION)
       jdiv_round_up((long) info->output_width,
 		    (long) info->iMCU_sample_width);
