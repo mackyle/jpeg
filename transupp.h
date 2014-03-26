@@ -1,7 +1,7 @@
 /*
  * transupp.h
  *
- * Copyright (C) 1997-2012, Thomas G. Lane, Guido Vollbeding.
+ * Copyright (C) 1997-2013, Thomas G. Lane, Guido Vollbeding.
  * This file is part of the Independent JPEG Group's software.
  * For conditions of distribution and use, see the accompanying README file.
  *
@@ -51,13 +51,16 @@
  *
  * We also offer a lossless-crop option, which discards data outside a given
  * image region but losslessly preserves what is inside.  Like the rotate and
- * flip transforms, lossless crop is restricted by the JPEG format: the upper
- * left corner of the selected region must fall on an iMCU boundary.  If this
- * does not hold for the given crop parameters, we silently move the upper left
- * corner up and/or left to make it so, simultaneously increasing the region
- * dimensions to keep the lower right crop corner unchanged.  (Thus, the
+ * flip transforms, lossless crop is restricted by the current JPEG format: the
+ * upper left corner of the selected region must fall on an iMCU boundary.  If
+ * this does not hold for the given crop parameters, we silently move the upper
+ * left corner up and/or left to make it so, simultaneously increasing the
+ * region dimensions to keep the lower right crop corner unchanged.  (Thus, the
  * output image covers at least the requested region, but may cover more.)
  * The adjustment of the region dimensions may be optionally disabled.
+ *
+ * A complementary lossless-wipe option is provided to discard (gray out) data
+ * inside a given image region while losslessly preserving what is outside.
  *
  * We also provide a lossless-resize option, which is kind of a lossless-crop
  * operation in the DCT coefficient block domain - it discards higher-order
@@ -103,6 +106,7 @@ typedef enum {
 	JXFORM_ROT_90,		/* 90-degree clockwise rotation */
 	JXFORM_ROT_180,		/* 180-degree rotation */
 	JXFORM_ROT_270,		/* 270-degree clockwise (or 90 ccw) */
+	JXFORM_WIPE,		/* wipe */
 	JXFORM_DROP		/* drop */
 } JXFORM_CODE;
 
@@ -131,7 +135,7 @@ typedef struct {
   boolean perfect;		/* if TRUE, fail if partial MCUs are requested */
   boolean trim;			/* if TRUE, trim partial MCUs as needed */
   boolean force_grayscale;	/* if TRUE, convert color image to grayscale */
-  boolean crop;			/* if TRUE, crop source image */
+  boolean crop;			/* if TRUE, crop or wipe source image, or drop */
 
   /* Crop parameters: application need not set these unless crop is TRUE.
    * These can be filled in by jtransform_parse_crop_spec().
@@ -156,7 +160,7 @@ typedef struct {
   JDIMENSION output_height;
   JDIMENSION x_crop_offset;	/* destination crop offsets measured in iMCUs */
   JDIMENSION y_crop_offset;
-  JDIMENSION drop_width;	/* drop dimensions measured in iMCUs */
+  JDIMENSION drop_width;	/* drop/wipe dimensions measured in iMCUs */
   JDIMENSION drop_height;
   int iMCU_sample_width;	/* destination iMCU size */
   int iMCU_sample_height;

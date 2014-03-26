@@ -1,7 +1,7 @@
 /*
  * transupp.c
  *
- * Copyright (C) 1997-2012, Thomas G. Lane, Guido Vollbeding.
+ * Copyright (C) 1997-2013, Thomas G. Lane, Guido Vollbeding.
  * This file is part of the Independent JPEG Group's software.
  * For conditions of distribution and use, see the accompanying README file.
  *
@@ -343,6 +343,44 @@ do_crop (j_decompress_ptr srcinfo, j_compress_ptr dstinfo,
 	 JDIMENSION x_crop_offset, JDIMENSION y_crop_offset,
 	 jvirt_barray_ptr *src_coef_arrays,
 	 jvirt_barray_ptr *dst_coef_arrays)
+/* Crop.  This is only used when no rotate/flip is requested with the crop. */
+{
+  JDIMENSION dst_blk_y, x_crop_blocks, y_crop_blocks;
+  int ci, offset_y;
+  JBLOCKARRAY src_buffer, dst_buffer;
+  jpeg_component_info *compptr;
+
+  /* We simply have to copy the right amount of data (the destination's
+   * image size) starting at the given X and Y offsets in the source.
+   */
+  for (ci = 0; ci < dstinfo->num_components; ci++) {
+    compptr = dstinfo->comp_info + ci;
+    x_crop_blocks = x_crop_offset * compptr->h_samp_factor;
+    y_crop_blocks = y_crop_offset * compptr->v_samp_factor;
+    for (dst_blk_y = 0; dst_blk_y < compptr->height_in_blocks;
+	 dst_blk_y += compptr->v_samp_factor) {
+      dst_buffer = (*srcinfo->mem->access_virt_barray)
+	((j_common_ptr) srcinfo, dst_coef_arrays[ci], dst_blk_y,
+	 (JDIMENSION) compptr->v_samp_factor, TRUE);
+      src_buffer = (*srcinfo->mem->access_virt_barray)
+	((j_common_ptr) srcinfo, src_coef_arrays[ci],
+	 dst_blk_y + y_crop_blocks,
+	 (JDIMENSION) compptr->v_samp_factor, FALSE);
+      for (offset_y = 0; offset_y < compptr->v_samp_factor; offset_y++) {
+	jcopy_block_row(src_buffer[offset_y] + x_crop_blocks,
+			dst_buffer[offset_y],
+			compptr->width_in_blocks);
+      }
+    }
+  }
+}
+
+
+LOCAL(void)
+do_crop_ext (j_decompress_ptr srcinfo, j_compress_ptr dstinfo,
+	     JDIMENSION x_crop_offset, JDIMENSION y_crop_offset,
+	     jvirt_barray_ptr *src_coef_arrays,
+	     jvirt_barray_ptr *dst_coef_arrays)
 /* Crop.  This is only used when no rotate/flip is requested with the crop.
  * Extension: If the destination size is larger than the source, we fill in
  * the extra area with zero (neutral gray).  Note we also have to zero partial
@@ -410,6 +448,38 @@ do_crop (j_decompress_ptr srcinfo, j_compress_ptr dstinfo,
 			  dst_buffer[offset_y],
 			  compptr->width_in_blocks);
 	}
+      }
+    }
+  }
+}
+
+
+LOCAL(void)
+do_wipe (j_decompress_ptr srcinfo, j_compress_ptr dstinfo,
+	 JDIMENSION x_crop_offset, JDIMENSION y_crop_offset,
+	 jvirt_barray_ptr *src_coef_arrays,
+	 JDIMENSION drop_width, JDIMENSION drop_height)
+/* Wipe - drop content of specified area, fill with zero (neutral gray) */
+{
+  JDIMENSION comp_width, comp_height;
+  JDIMENSION blk_y, x_wipe_blocks, y_wipe_blocks;
+  int ci, offset_y;
+  JBLOCKARRAY buffer;
+  jpeg_component_info *compptr;
+
+  for (ci = 0; ci < dstinfo->num_components; ci++) {
+    compptr = dstinfo->comp_info + ci;
+    comp_width = drop_width * compptr->h_samp_factor;
+    comp_height = drop_height * compptr->v_samp_factor;
+    x_wipe_blocks = x_crop_offset * compptr->h_samp_factor;
+    y_wipe_blocks = y_crop_offset * compptr->v_samp_factor;
+    for (blk_y = 0; blk_y < comp_height; blk_y += compptr->v_samp_factor) {
+      buffer = (*srcinfo->mem->access_virt_barray)
+	((j_common_ptr) srcinfo, src_coef_arrays[ci], blk_y + y_wipe_blocks,
+	 (JDIMENSION) compptr->v_samp_factor, TRUE);
+      for (offset_y = 0; offset_y < compptr->v_samp_factor; offset_y++) {
+	FMEMZERO(buffer[offset_y] + x_wipe_blocks,
+		 comp_width * SIZEOF(JBLOCK));
       }
     }
   }
@@ -1191,7 +1261,8 @@ jtransform_request_workspace (j_decompress_ptr srcinfo,
 
   /* Determine number of components in output image */
   if (info->force_grayscale &&
-      srcinfo->jpeg_color_space == JCS_YCbCr &&
+      (srcinfo->jpeg_color_space == JCS_YCbCr ||
+       srcinfo->jpeg_color_space == JCS_BG_YCC) &&
       srcinfo->num_components == 3)
     /* We'll only process the first component */
     info->num_components = 1;
@@ -1307,22 +1378,21 @@ jtransform_request_workspace (j_decompress_ptr srcinfo,
       }
     }
     /* Convert negative crop offsets into regular offsets */
-    if (info->crop_xoffset_set == JCROP_NEG) {
-      if (info->crop_width > info->output_width)
-	xoffset = info->crop_width - info->output_width - info->crop_xoffset;
-      else
-	xoffset = info->output_width - info->crop_width - info->crop_xoffset;
-    } else
+    if (info->crop_xoffset_set != JCROP_NEG)
       xoffset = info->crop_xoffset;
-    if (info->crop_yoffset_set == JCROP_NEG) {
-      if (info->crop_height > info->output_height)
-	yoffset = info->crop_height - info->output_height - info->crop_yoffset;
-      else
-	yoffset = info->output_height - info->crop_height - info->crop_yoffset;
-    } else
+    else if (info->crop_width > info->output_width) /* crop extension */
+      xoffset = info->crop_width - info->output_width - info->crop_xoffset;
+    else
+      xoffset = info->output_width - info->crop_width - info->crop_xoffset;
+    if (info->crop_yoffset_set != JCROP_NEG)
       yoffset = info->crop_yoffset;
+    else if (info->crop_height > info->output_height) /* crop extension */
+      yoffset = info->crop_height - info->output_height - info->crop_yoffset;
+    else
+      yoffset = info->output_height - info->crop_height - info->crop_yoffset;
     /* Now adjust so that upper left corner falls at an iMCU boundary */
-    if (info->transform == JXFORM_DROP) {
+    switch (info->transform) {
+    case JXFORM_DROP:
       /* Ensure the effective drop region will not exceed the requested */
       itemp = info->iMCU_sample_width;
       dtemp = itemp - 1 - ((xoffset + itemp - 1) % itemp);
@@ -1367,7 +1437,17 @@ jtransform_request_workspace (j_decompress_ptr srcinfo,
 	      srcinfo->comp_info[ci].v_samp_factor,
 	      srcinfo->max_v_samp_factor, 'v');
 	}
-    } else {
+      break;
+    case JXFORM_WIPE:
+      /* Ensure the effective wipe region will cover the requested */
+      info->drop_width = (JDIMENSION) jdiv_round_up
+	((long) (info->crop_width + (xoffset % info->iMCU_sample_width)),
+	 (long) info->iMCU_sample_width);
+      info->drop_height = (JDIMENSION) jdiv_round_up
+	((long) (info->crop_height + (yoffset % info->iMCU_sample_height)),
+	 (long) info->iMCU_sample_height);
+      break;
+    default:
       /* Ensure the effective crop region will cover the requested */
       if (info->crop_width_set == JCROP_FORCE ||
 	  info->crop_width > info->output_width)
@@ -1381,6 +1461,7 @@ jtransform_request_workspace (j_decompress_ptr srcinfo,
       else
 	info->output_height =
 	  info->crop_height + (yoffset % info->iMCU_sample_height);
+      break;
     }
     /* Save x/y offsets measured in iMCUs */
     info->x_crop_offset = xoffset / info->iMCU_sample_width;
@@ -1452,6 +1533,8 @@ jtransform_request_workspace (j_decompress_ptr srcinfo,
     /* Need workspace arrays having transposed dimensions. */
     need_workspace = TRUE;
     transpose_it = TRUE;
+    break;
+  case JXFORM_WIPE:
     break;
   case JXFORM_DROP:
 #if DROP_REQUEST_FROM_SRC
@@ -1718,12 +1801,13 @@ jtransform_adjust_parameters (j_decompress_ptr srcinfo,
 {
   /* If force-to-grayscale is requested, adjust destination parameters */
   if (info->force_grayscale) {
-    /* First, ensure we have YCbCr or grayscale data, and that the source's
+    /* First, ensure we have YCC or grayscale data, and that the source's
      * Y channel is full resolution.  (No reasonable person would make Y
      * be less than full resolution, so actually coping with that case
      * isn't worth extra code space.  But we check it to avoid crashing.)
      */
-    if (((dstinfo->jpeg_color_space == JCS_YCbCr &&
+    if ((((dstinfo->jpeg_color_space == JCS_YCbCr ||
+	   dstinfo->jpeg_color_space == JCS_BG_YCC) &&
 	  dstinfo->num_components == 3) ||
 	 (dstinfo->jpeg_color_space == JCS_GRAYSCALE &&
 	  dstinfo->num_components == 1)) &&
@@ -1824,9 +1908,11 @@ jtransform_execute_transform (j_decompress_ptr srcinfo,
    */
   switch (info->transform) {
   case JXFORM_NONE:
-    if (info->x_crop_offset != 0 || info->y_crop_offset != 0 ||
-	info->output_width > srcinfo->output_width ||
+    if (info->output_width > srcinfo->output_width ||
 	info->output_height > srcinfo->output_height)
+      do_crop_ext(srcinfo, dstinfo, info->x_crop_offset, info->y_crop_offset,
+		  src_coef_arrays, dst_coef_arrays);
+    else if (info->x_crop_offset != 0 || info->y_crop_offset != 0)
       do_crop(srcinfo, dstinfo, info->x_crop_offset, info->y_crop_offset,
 	      src_coef_arrays, dst_coef_arrays);
     break;
@@ -1861,6 +1947,10 @@ jtransform_execute_transform (j_decompress_ptr srcinfo,
   case JXFORM_ROT_270:
     do_rot_270(srcinfo, dstinfo, info->x_crop_offset, info->y_crop_offset,
 	       src_coef_arrays, dst_coef_arrays);
+    break;
+  case JXFORM_WIPE:
+    do_wipe(srcinfo, dstinfo, info->x_crop_offset, info->y_crop_offset,
+	    src_coef_arrays, info->drop_width, info->drop_height);
     break;
   case JXFORM_DROP:
     if (info->drop_width != 0 && info->drop_height != 0)
