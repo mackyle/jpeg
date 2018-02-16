@@ -1,7 +1,7 @@
 /*
  * transupp.c
  *
- * Copyright (C) 1997-2017, Thomas G. Lane, Guido Vollbeding.
+ * Copyright (C) 1997-2018, Thomas G. Lane, Guido Vollbeding.
  * This file is part of the Independent JPEG Group's software.
  * For conditions of distribution and use, see the accompanying README file.
  *
